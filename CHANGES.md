@@ -9,10 +9,60 @@
   without IPv6 support must pass `-i 0.0.0.0`.
 - The startup log lists every reachable URL when bound to a wildcard
   address.
+- `--log '<stdout>'` is now rejected in CGI mode, including when the mode
+  is inferred from `QUERY_STRING` (#2948).
+- The random person link (`rnd=1`) is resolved server-side, among the
+  persons visible to the user, and honors `access_by_key`. On the A, C, D,
+  F, LINKED and R tools it keeps the current tool.
+- The statistics lists (`m=LB`, `LD`, `LM`, `OA`, `OE`) and the age pyramid
+  (`m=POP_PYR`) are open to visitors. The lists only show the persons and
+  families visible to them; the pyramid counts the whole base.
+- A refused or cancelled HTTP authentication and a failed password login
+  return to the welcome page with an error notification, replacing the
+  dedicated "access cancelled" page.
+- A `notif` parameter supplied in the URL is ignored.
+- Fix the wizard visibility toggle (`m=CHANGE_WIZ_VIS`) on Windows.
+- In notes, renaming a person keeps the case of the name in the links
+  pointing to it, and writes the family marker as `#N` (the `&N` written
+  by 7.1-beta2 is still read). A link added or removed in any note is now
+  indexed when saved, not only when the note's owner is renamed. Run
+  `update_nldb` once after upgrading (#2961).
+- Links inside `{...}` highlights are rendered as links; an unclosed `{`
+  is displayed as typed (#2961).
 
 ## Gwsetup
 - Bind `127.0.0.1` instead of resolving `localhost`, which selects the
   IPv6 loopback only on Windows.
+- Remove the `.gwf` parameters editor: it only handled the variables of
+  its form and blanked the others on "Apply". Edit the `.gwf` file with a
+  text editor (#2916).
+- Command result pages show the path of the log file and wrap long lines.
+  Progress bars are no longer written when the output is redirected to a
+  file (#2916).
+- `geneweb.sh` writes `gwd.log` next to `gwsetup.log` in `bases/`, so both
+  are rotated at startup (#3033).
+- `-only <file>` no longer aborts gwsetup at startup; it is deprecated
+  and ignored (#3033).
+- `comm.log` is written next to `gwsetup.log` in the launch directory
+  instead of the shared temporary directory (#3033).
+
+## Templates
+- Accessibility pass on the welcome, home, menubar, copyr and person
+  pages: labelled fields, named icon-only controls, no positive tabindex,
+  main landmarks, working skip link.
+- The connected wizards and wizard notes pages include home.txt.
+- Copying the wiki link of a person from the menubar works again,
+  including over plain HTTP.
+- Remove the back links built from the HTTP Referer.
+- New `is_upd_ind` and `is_upd_fam` template variables, true on the
+  person and family update forms.
+
+## Deprecated features
+- Inferring the CGI mode of `gwd` from the `QUERY_STRING` environment
+  variable is deprecated (#2936). Use the `--cgi` option. Note that a CGI
+  binary invoked directly by the web server receives no command line
+  arguments, so `--cgi` requires a wrapper script; this has to be settled
+  before the inference is actually removed.
 
 ## Breaking changes
 - Deprecate the multi-parents feature (#2726)
@@ -23,6 +73,13 @@
 - The `-unsafe` and `-force` options of the plugin subsystem are noop.
   Use `--plugins u:...`, `--plugins f:...`, `--plugins uf:...` for the same
   effect (#2594).
+- The `referer` and `has_referer` template variables are removed. The
+  `%w` and `%W` macros of base source files print nothing.
+
+## Build system
+The camlp5 dependency has been removed. The GEDCOM date grammar and the stream
+parsers of `ged2gwb`, its last remaining users, have been rewritten in plain
+OCaml (#2927).
 
 # GeneWeb version 7.1.0~beta2
 After 20 months of development, this release represents a major evolution of

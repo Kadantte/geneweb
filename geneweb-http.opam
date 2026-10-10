@@ -12,6 +12,7 @@ depends: [
   "ocaml"
   "camlp-streams"
   "geneweb-compat"
+  "geneweb-win32"
   "logs"
   "fmt"
   "odoc" {with-doc}

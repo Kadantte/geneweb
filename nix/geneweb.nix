@@ -6,11 +6,11 @@
   brotli,
   cmdliner,
   crunch,
+  base64,
   pcre2,
   benchmark,
   calendars,
   dune-site,
-  camlp5,
   camlp-streams,
   decompress,
   fmt,
@@ -34,7 +34,6 @@
   digestif,
   pp_loc,
   ptime,
-  not-ocamlfind,
   geneweb-compat,
   geneweb-http,
 }:
@@ -47,8 +46,6 @@ buildDunePackage {
 
   nativeBuildInputs = [
     brotli
-    not-ocamlfind
-    camlp5
     crunch
   ];
 
@@ -62,12 +59,12 @@ buildDunePackage {
     geneweb-compat
     geneweb-http
     ancient
+    base64
     cmdliner
     pcre2
     benchmark
     calendars
     dune-site
-    camlp5
     camlp-streams
     decompress
     fmt

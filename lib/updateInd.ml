@@ -142,6 +142,7 @@ and eval_simple_var conf base env p = function
   | [ "first_name_alias" ] -> eval_string_env "first_name_alias" env
   | [ "has_aliases" ] -> bool_val (p.aliases <> [])
   | [ "has_birth_date" ] -> bool_val (Date.od_of_cdate p.birth <> None)
+  | [ "has_image" ] | [ "has_portrait" ] -> bool_val ((p.image :> string) <> "")
   | [ "has_pevent_birth" ] ->
       let rec loop pevents =
         match pevents with
@@ -226,6 +227,10 @@ and eval_simple_var conf base env p = function
       | _ -> raise Not_found)
   | [ "is_public" ] -> VVbool (p.access = Public)
   | [ "is_semi_public" ] -> VVbool (p.access = SemiPublic)
+  | [ "is_upd_ind" ] -> (
+      match get_env "is_upd_ind" env with
+      | Vbool x -> bool_val x
+      | _ -> raise Not_found)
   | [ "nb_pevents" ] -> str_val (string_of_int (List.length p.pevents))
   | [ "not_dead" ] -> bool_val (p.death = NotDead)
   | [ "notes" ] -> safe_val (Util.escape_html p.notes :> Adef.safe_string)
@@ -629,6 +634,7 @@ let print_update_ind conf base p digest =
         Templ.Env.empty
         |> Templ.Env.add "digest" (Vstring digest)
         |> Templ.Env.add "next_pevent" (Vcnt (ref (List.length p.pevents + 1)))
+        |> Templ.Env.add "is_upd_ind" (Vbool true)
       in
       let ifun =
         Templ.

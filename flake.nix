@@ -2,7 +2,7 @@
   description = "GeneWeb";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
     flake-parts.url = "github:hercules-ci/flake-parts";
     ocaml-ancient = {
       url = "github:OCamlPro/ocaml-ancient";
@@ -43,6 +43,7 @@
             {
               inherit (scope)
                 geneweb-compat
+                geneweb-win32
                 geneweb-http
                 geneweb
                 geneweb-rpc
@@ -50,54 +51,42 @@
                 ;
             };
 
-          apps.default = {
-            type = "app";
-            program = "${self.packages.${system}.geneweb}/bin/gwd";
-            meta.description = "Run gwd server.";
+          apps = {
+            default = {
+              type = "app";
+              program = "${self.packages.${system}.geneweb}/bin/gwd";
+              meta.description = "Run gwd server";
+            };
+
+            gwsetup = {
+              type = "app";
+              program = "${self.packages.${system}.geneweb}/bin/gwsetup";
+              meta.description = "Run gwsetup server";
+            };
           };
 
-          devShells.default =
-            let
-              ocamlPackages = pkgs.ocamlPackages;
-              # Due to Nix's package isolation principle, the findlib package cannot
-              # install the topfind script into the OCaml directory. This wrapper
-              # provides a workaround by adding the absolute path to this script to
-              # directories searched by the OCaml compiler.
-              ocamlWrapped = pkgs.symlinkJoin {
-                name = "ocaml";
-                paths = [ ocamlPackages.ocaml ];
-                buildInputs = [ pkgs.makeWrapper ];
-                postBuild = ''
-                  wrapProgram $out/bin/ocaml \
-                    --add-flags "-I ${ocamlPackages.findlib}/lib/ocaml/${ocamlPackages.ocaml.version}/site-lib"
-                '';
-              };
-            in
-            pkgs.mkShell {
-              packages = [
-                ocamlWrapped
-              ]
-              ++ (with ocamlPackages; [
-                qcheck
-                qcheck-alcotest
-                alcotest
-                findlib
-                (odoc.overrideAttrs { doCheck = false; })
-                ocaml-lsp
-                patdiff
-                memtrace
-                ocamlformat
-                oui
-                dead_code_analyzer
-              ]);
+          devShells.default = pkgs.mkShell {
+            packages = with pkgs.ocamlPackages; [
+              qcheck
+              qcheck-alcotest
+              alcotest
+              findlib
+              odoc
+              ocaml-lsp
+              patdiff
+              memtrace
+              ocamlformat
+              oui
+              dead_code_analyzer
+            ];
 
-              inputsFrom = [
-                self.packages.${system}.geneweb-compat
-                self.packages.${system}.geneweb-http
-                self.packages.${system}.geneweb
-                self.packages.${system}.geneweb-rpc
-              ];
-            };
+            inputsFrom = [
+              self.packages.${system}.geneweb-compat
+              self.packages.${system}.geneweb-http
+              self.packages.${system}.geneweb
+              self.packages.${system}.geneweb-rpc
+            ];
+          };
         };
     };
 }

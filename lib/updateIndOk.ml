@@ -30,34 +30,17 @@ let rec reconstitute_string_list conf var ext cnt =
       | Some _ | None -> (s :: sl, ext))
 
 let reconstitute_insert_title conf ext cnt tl =
-  let var = "ins_title" ^ string_of_int cnt in
-  let n =
-    match (p_getenv conf.env var, p_getint conf.env (var ^ "_n")) with
-    | _, Some n when n > 1 -> n
-    | Some "on", _ -> 1
-    | _ -> 0
-  in
-  if n > 0 then
-    let tl =
-      let rec loop tl n =
-        if n > 0 then
-          let t1 =
-            {
-              t_name = Tnone;
-              t_ident = "";
-              t_place = "";
-              t_date_start = Date.cdate_None;
-              t_date_end = Date.cdate_None;
-              t_nth = 0;
-            }
-          in
-          loop (t1 :: tl) (n - 1)
-        else tl
-      in
-      loop tl n
-    in
-    (tl, true)
-  else (tl, ext)
+  insert_blanks conf
+    ("ins_title" ^ string_of_int cnt)
+    {
+      t_name = Tnone;
+      t_ident = "";
+      t_place = "";
+      t_date_start = Date.cdate_None;
+      t_date_end = Date.cdate_None;
+      t_nth = 0;
+    }
+    (tl, ext)
 
 let rec reconstitute_titles conf ext cnt =
   match
@@ -217,7 +200,7 @@ let rec reconstitute_pevents conf ext cnt =
           match
             try Some (reconstitute_somebody conf key) with Failure _ -> None
           with
-          | Some (fn, sn, occ, create, var) -> (
+          | Some (fn, sn, occ, create, var) ->
               let witnesses, ext = loop (i + 1) ext in
               let create = update_ci conf create key in
               let c = (fn, sn, occ, create, var) in
@@ -233,60 +216,30 @@ let rec reconstitute_pevents conf ext cnt =
                 | Some "othe" -> (c, Witness_Other)
                 | _ -> (c, Witness)
               in
-              let var_w =
-                "e" ^ string_of_int cnt ^ "_ins_witn" ^ string_of_int i
+              let c, witnesses, ext =
+                let var =
+                  "e" ^ string_of_int cnt ^ "_inv_witn" ^ string_of_int (i + 1)
+                in
+                match (p_getenv conf.env var, witnesses) with
+                | Some "on", c1 :: witnesses -> (c1, c :: witnesses, true)
+                | (Some _ | None), _ -> (c, witnesses, ext)
               in
-              match p_getenv conf.env var_w with
-              | Some "on" -> (
-                  let ins_witn_n =
-                    "e" ^ string_of_int cnt ^ "_ins_witn" ^ string_of_int i
-                    ^ "_n"
-                  in
-                  match p_getint conf.env ins_witn_n with
-                  | Some n when n > 1 ->
-                      let rec loop_witn n witnesses =
-                        if n = 0 then (c :: witnesses, true)
-                        else
-                          let new_witn =
-                            (("", "", 0, Update.Create (Neuter, None), ""), wk)
-                          in
-                          let witnesses = new_witn :: witnesses in
-                          loop_witn (n - 1) witnesses
-                      in
-                      loop_witn n witnesses
-                  | _ ->
-                      let new_witn =
-                        (("", "", 0, Update.Create (Neuter, None), ""), wk)
-                      in
-                      (c :: new_witn :: witnesses, true))
-              | _ -> (c :: witnesses, ext))
+              let witnesses, ext =
+                insert_blanks conf
+                  ("e" ^ string_of_int cnt ^ "_ins_witn" ^ string_of_int i)
+                  (("", "", 0, Update.Create (Neuter, None), ""), wk)
+                  (witnesses, ext)
+              in
+              (c :: witnesses, ext)
           | None -> ([], ext)
         in
         loop 1 ext
       in
       let witnesses, ext =
-        let evt_ins = "e" ^ string_of_int cnt ^ "_ins_witn0" in
-        match p_getenv conf.env evt_ins with
-        | Some "on" -> (
-            let ins_witn_n = "e" ^ string_of_int cnt ^ "_ins_witn0_n" in
-            match p_getint conf.env ins_witn_n with
-            | Some n when n > 1 ->
-                let rec loop_witn n witnesses =
-                  if n = 0 then (witnesses, true)
-                  else
-                    let new_witn =
-                      (("", "", 0, Update.Create (Neuter, None), ""), wk)
-                    in
-                    let witnesses = new_witn :: witnesses in
-                    loop_witn (n - 1) witnesses
-                in
-                loop_witn n witnesses
-            | Some _ | None ->
-                let new_witn =
-                  (("", "", 0, Update.Create (Neuter, None), ""), wk)
-                in
-                (new_witn :: witnesses, true))
-        | Some _ | None -> (witnesses, ext)
+        insert_blanks conf
+          ("e" ^ string_of_int cnt ^ "_ins_witn0")
+          (("", "", 0, Update.Create (Neuter, None), ""), wk)
+          (witnesses, ext)
       in
       let e =
         {
@@ -847,6 +800,8 @@ let effective_mod ?prerr ?skip_conflict conf base sp =
   let ofn = Driver.p_first_name base op in
   let osn = Driver.p_surname base op in
   let oocc = Driver.get_occ op in
+  if (List.assoc_opt "nsck" conf.env :> string option) <> Some "on" then
+    check_sex_married ?prerr conf base sp op;
   (if
      (not (String.equal ofn sp.first_name && String.equal osn sp.surname))
      || oocc <> sp.occ
@@ -859,8 +814,6 @@ let effective_mod ?prerr ?skip_conflict conf base sp =
      | _ ->
          Image.rename_portrait_and_blason conf base op
            (sp.first_name, sp.surname, sp.occ));
-  if (List.assoc_opt "nsck" conf.env :> string option) <> Some "on" then
-    check_sex_married ?prerr conf base sp op;
   let created_p = ref [] in
   let np =
     Futil.map_person_ps
@@ -868,6 +821,7 @@ let effective_mod ?prerr ?skip_conflict conf base sp =
       (Driver.insert_string base)
       sp
   in
+  List.iter (Notes.update_notes_links_person ~old_text:"" conf base) !created_p;
   let np = { np with related = Driver.get_related op } in
   let ol_rparents = rparents_of (Driver.get_rparents op) in
   let nl_rparents = rparents_of np.rparents in
@@ -962,12 +916,7 @@ let effective_del_no_commit base op =
   Driver.delete_person_rec base op.key_index
 
 let effective_del_commit conf base op =
-  Notes.update_notes_links_db base (Def.NLDB.PgInd op.key_index) "";
-  let key =
-    Util.make_key base
-      (Driver.gen_person_of_person (Driver.poi base op.key_index))
-  in
-  Notes.update_cache_linked_pages conf Notes.Delete key key 0;
+  Notes.update_notes_links_db conf base (Def.NLDB.PgInd op.key_index) "";
   Util.commit_patches conf base;
   let changed = U_Delete_person op in
   History.record conf base changed "dp"
@@ -991,7 +940,9 @@ let print_mod_ok conf base wl pgl p ofn osn oocc =
          (fun acc c -> acc ^ "'" ^ Char.escaped c ^ "' ")
          " " Name.forbidden_char);
     Output.print_sstring conf "</h3>\n";
-    List.iter (Output.printf conf "<p>%s</p>") !removed_string);
+    List.iter
+      (fun s -> Output.printf conf "<p>%s</p>" (Util.escape_html s :> string))
+      !removed_string);
   (* Si on a supprimé des relations, on les mentionne *)
   (match !deleted_relation with
   | [] -> ()
@@ -1036,13 +987,19 @@ let print_mod_ok conf base wl pgl p ofn osn oocc =
        <span class=\"float-start ms-1\">%s/%s%s</span>\n\
        <br>"
       (Utf8.capitalize_fst (transl conf "old name"))
-      (transl conf ":") ofn osn soocc;
+      (transl conf ":")
+      (Util.escape_html ofn :> string)
+      (Util.escape_html osn :> string)
+      soocc;
     Output.printf conf
       "<span class=\"unselectable float-start\">%s%s</span>\n\
        <span class=\"float-start ms-1\">%s/%s%s</span>\n\
        <br>"
       (Utf8.capitalize_fst (transl conf "new name"))
-      (transl conf ":") nfn nsn snocc;
+      (transl conf ":")
+      (Util.escape_html nfn :> string)
+      (Util.escape_html nsn :> string)
+      snocc;
     Output.printf conf "<span>%s%s</span>"
       (Utf8.capitalize_fst (transl conf "linked pages"))
       (transl conf ":");
@@ -1138,10 +1095,9 @@ let print_mod ?prerr o_conf base =
   let ofn = o_p.first_name in
   let osn = o_p.surname in
   let oocc = o_p.occ in
-  let old_key =
-    Util.make_key base
-      (Driver.gen_person_of_person (Driver.poi base o_p.key_index))
-  in
+  let old_p = Driver.gen_person_of_person (Driver.poi base o_p.key_index) in
+  let old_key = Util.make_key base old_p in
+  let old_text = Notes.notes_bearing_text_of_person base old_p in
   let conf = Update.update_conf o_conf in
   let pgl =
     let db = Driver.read_nldb base in
@@ -1152,26 +1108,24 @@ let print_mod ?prerr o_conf base =
     with_lock conf @@ fun () ->
     let p = effective_mod ?prerr conf base sp in
     let op = Driver.poi base p.key_index in
-    let u = { family = Driver.get_family op } in
-    Driver.patch_person base p.key_index p;
-    let new_key = Util.make_key base p in
-    if old_key <> new_key then (
-      (* Needs the updates in this order in case of self-reference *)
-      Notes.update_notes_links_person base p;
-      Notes.update_ind_key conf base pgl old_key new_key;
-      Notes.update_cache_linked_pages conf Notes.Rename old_key new_key 0);
-    let wl =
-      let a = Driver.poi base p.key_index in
-      let a =
-        { parents = Driver.get_parents a; consang = Driver.get_consang a }
+    if p = Driver.gen_person_of_person op then
+      Update.redirect_unchanged conf base op
+    else
+      let u = { family = Driver.get_family op } in
+      Driver.patch_person base p.key_index p;
+      Notes.on_person_saved conf base ~old_key ~old_text ~pgl:(fun () -> pgl) p;
+      let wl =
+        let a = Driver.poi base p.key_index in
+        let a =
+          { parents = Driver.get_parents a; consang = Driver.get_consang a }
+        in
+        all_checks_person base p a u
       in
-      all_checks_person base p a u
-    in
-    Util.commit_patches conf base;
-    let changed = U_Modify_person (o_p, Util.string_gen_person base p) in
-    History.record conf base changed "mp";
-    Update.delete_topological_sort_v conf base;
-    print_mod_ok conf base wl pgl p ofn osn oocc
+      Util.commit_patches conf base;
+      let changed = U_Modify_person (o_p, Util.string_gen_person base p) in
+      History.record conf base changed "mp";
+      Update.delete_topological_sort_v conf base;
+      print_mod_ok conf base wl pgl p ofn osn oocc
   in
   print_mod_aux conf base callback
 
@@ -1202,19 +1156,22 @@ let print_change_event_order conf base =
             with Not_found -> failwith "Sorting event")
           sorted_pevents []
       in
-      let p = Driver.gen_person_of_person p in
-      let p = { p with pevents } in
-      Driver.patch_person base p.key_index p;
-      let wl =
-        let a = Driver.poi base p.key_index in
-        let a =
-          { parents = Driver.get_parents a; consang = Driver.get_consang a }
+      if pevents = Driver.get_pevents p then
+        Update.redirect_unchanged conf base p
+      else
+        let p = Driver.gen_person_of_person p in
+        let p = { p with pevents } in
+        Driver.patch_person base p.key_index p;
+        let wl =
+          let a = Driver.poi base p.key_index in
+          let a =
+            { parents = Driver.get_parents a; consang = Driver.get_consang a }
+          in
+          let u = Driver.poi base p.key_index in
+          let u = { family = Driver.get_family u } in
+          all_checks_person base p a u
         in
-        let u = Driver.poi base p.key_index in
-        let u = { family = Driver.get_family u } in
-        all_checks_person base p a u
-      in
-      Util.commit_patches conf base;
-      let changed = U_Modify_person (o_p, Util.string_gen_person base p) in
-      History.record conf base changed "mp";
-      print_change_event_order_ok conf base wl p
+        Util.commit_patches conf base;
+        let changed = U_Modify_person (o_p, Util.string_gen_person base p) in
+        History.record conf base changed "mp";
+        print_change_event_order_ok conf base wl p

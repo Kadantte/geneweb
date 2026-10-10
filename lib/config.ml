@@ -54,6 +54,7 @@ type config = {
   user : string;
   username : string;
   userkey : string;
+  consent : bool;
   user_iper : Geneweb_db.Driver.iper option;
   auth_scheme : auth_scheme_kind;
   command : string;
@@ -61,6 +62,7 @@ type config = {
   highlight : string;
   lang : string;
   vowels : string list;
+  base_lang : string;
   default_lang : string;
   browser_lang : string;
   default_sosa_ref : Geneweb_db.Driver.iper * Geneweb_db.Driver.person option;
@@ -101,9 +103,7 @@ type config = {
   ctime : float; (* TODO verify usefulness *)
   mutable output_conf : output_conf;
   (* HTTP printer *)
-  (* prefix for image urls:
-     the value of argument -images_url if specified, otherwise
-     command ^ "?m=IM&v=" in CGI mode
+  (* prefix for image urls: the value of -images_prefix in CGI mode,
      "images" otherwise *)
   gw_prefix : string;
   images_prefix : string;
@@ -138,6 +138,7 @@ let empty =
     user = "";
     username = "";
     userkey = "";
+    consent = false;
     user_iper = None;
     auth_scheme = NoAuth;
     command = "";
@@ -145,6 +146,7 @@ let empty =
     highlight = "";
     lang = "";
     vowels = [];
+    base_lang = "";
     default_lang = "";
     browser_lang = "";
     default_sosa_ref = (Geneweb_db.Driver.Iper.dummy, None);

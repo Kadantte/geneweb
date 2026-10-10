@@ -4,6 +4,7 @@ open Config
 open Util
 module Driver = Geneweb_db.Driver
 module Gutil = Geneweb_db.Gutil
+module Connection = Geneweb_http.Connection
 
 let wiz_dir conf base =
   Filename.concat (Util.bpath conf.bname) (Driver.base_wiznotes_dir base)
@@ -112,11 +113,11 @@ let print_wizards_by_alphabetic_order conf list =
         String.sub wname 0 islash
       in
       let s2 = String.sub wname islash (String.length wname - islash) in
-      Output.print_string conf (Util.escape_html s2);
+      Output.print_string conf (Util.safe_html s2);
       Output.print_sstring conf " (";
-      Output.print_string conf (Util.escape_html s1);
+      Output.print_string conf (Util.safe_html s1);
       Output.print_sstring conf ")")
-    else Output.print_string conf (Util.escape_html wname);
+    else Output.print_string conf (Util.safe_html wname);
     if wlink then Output.print_sstring conf "</a>"
   in
   let order (_, (_, (ord, _)), _, _) = ord in
@@ -189,9 +190,9 @@ let print_wizards_by_date conf list =
                 (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
                 tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec);
            Output.print_sstring conf {|">|};
-           Output.print_string conf (Util.escape_html wname);
+           Output.print_string conf (Util.safe_html wname);
            Output.print_sstring conf {|</a>|})
-         else Output.print_string conf (Util.escape_html wname);
+         else Output.print_string conf (Util.safe_html wname);
          (spl, Some tm))
        (sep_period_list, None) list;
   Output.print_sstring conf "</dd></dl>"
@@ -285,7 +286,7 @@ let print_main conf base auth_file =
     else list
   in
   let wiznotes_dir = wiz_dir conf base in
-  Hutil.header_without_home conf title;
+  Hutil.header conf title;
   (* mouais... *)
   let list =
     List.map
@@ -362,10 +363,10 @@ let print_whole_wiznote conf base auth_file wz wfile (s, date) ho =
     with Not_found -> ("", s)
   in
   let title =
-    if title = "" then wizard_page_title conf @@ Util.escape_html wizname
+    if title = "" then wizard_page_title conf @@ Util.safe_html wizname
     else wizard_page_title conf @@ Util.escape_html title
   in
-  Hutil.header_without_home conf title;
+  Hutil.header conf title;
   Output.print_sstring conf {|<table border="0" width="100%"><tr><td>|};
   let s = string_with_macros conf [] s in
   let s =
@@ -413,7 +414,7 @@ let print_whole_wiznote conf base auth_file wz wfile (s, date) ho =
 
 let print_part_wiznote conf base wz s cnt0 =
   let title = Util.escape_html wz in
-  Hutil.header_without_home conf (fun _ -> Output.print_string conf title);
+  Hutil.header conf (fun _ -> Output.print_string conf title);
   let s = Util.safe_html @@ string_with_macros conf [] s in
   let lines = Wiki.extract_sub_part (s : Adef.safe_string :> string) cnt0 in
   let lines =
@@ -500,7 +501,7 @@ let commit_wiznotes conf base wz s =
   (try Unix.mkdir wiznotes_dir 0o755 with Unix.Unix_error (_, _, _) -> ());
   write_wizard_notes fname s;
   let pg = Def.NLDB.PgWizard wz in
-  Notes.update_notes_links_db base pg s
+  Notes.update_notes_links_db conf base pg s
 
 let print_mod_ok conf base =
   let auth_file = wizard_auth_file_name conf in
@@ -578,7 +579,7 @@ let do_connected_wizards conf base (_, _, _, wl) =
     transl_nth conf "wizard/wizards/friend/friends/exterior" 1
     |> Utf8.capitalize_fst |> Output.print_sstring conf
   in
-  Hutil.header_without_home conf title;
+  Hutil.header conf title;
   let wiznotes_dir = wiz_dir conf base in
   let denying = wizard_denying wiznotes_dir in
   let wl =
@@ -604,7 +605,7 @@ let do_connected_wizards conf base (_, _, _, wl) =
           print_connected_wizard conf first wiznotes_dir wz tm_user;
           if wz = conf.user then (
             Output.print_sstring conf (transl conf ":");
-            Output.print_sstring conf " :";
+            Output.print_sstring conf " ";
             Output.print_sstring conf
               (transl_nth conf "you are visible/you are not visible"
                  (if is_visible then 0 else 1));
@@ -641,17 +642,17 @@ let do_change_wizard_visibility conf base x set_vis =
   (if ((not set_vis) && not is_visible) || (set_vis && is_visible) then ()
    else
      let tmp_file = Filename.concat wiznotes_dir "1connected.deny" in
-     Secure.with_open_out_text tmp_file @@ fun oc ->
-     let found =
-       List.fold_left
-         (fun found wz ->
-           if wz = conf.user && set_vis then true
-           else (
-             Printf.fprintf oc "%s\n" wz;
-             found))
-         false denying
-     in
-     if (not found) && not set_vis then Printf.fprintf oc "%s\n" conf.user;
+     ( Secure.with_open_out_text tmp_file @@ fun oc ->
+       let found =
+         List.fold_left
+           (fun found wz ->
+             if wz = conf.user && set_vis then true
+             else (
+               Printf.fprintf oc "%s\n" wz;
+               found))
+           false denying
+       in
+       if (not found) && not set_vis then Printf.fprintf oc "%s\n" conf.user );
      let file = Filename.concat wiznotes_dir "connected.deny" in
      Mutil.rm file;
      Sys.rename tmp_file file);

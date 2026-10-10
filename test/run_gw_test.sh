@@ -399,6 +399,14 @@ crl "m=LB&k=30"
 crl "m=LD&k=30"
 crl "m=LL&k=30"
 crl "m=LM&k=30"
+crl "m=LINKED&p=$FN&n=$SN&oc=$OC"
+# Regression check for issue #2998: the page <title> must not contain
+# unescaped HTML (e.g. the <span title=...> tooltip, which belongs in <h1>
+# but not in <title>, which only accepts plain text).
+if grep $GREPOPT "<title>[^<]*<span" /tmp/tmp.txt; then
+  echo "HTML leaking into <title> for m=LINKED (issue #2998)."
+  RC=$(($RC+1))
+fi
 crl "m=MISC_NOTES"
 crl "m=MOD_DATA&data=fn"
 crl "m=MOD_DATA&data=sn"
@@ -510,7 +518,7 @@ if test "$GWD2START" && test -z "$cgitest"; then
 
     test -n "$debug" && set -x
     sh -c "cd $BASES_DIR;
-    OCAMLRUNPARAM=b $SUDOPRFX ../gw/gwsetup -gd ../gw -lang en >gwsetup.log 2>&1 &"
+    OCAMLRUNPARAM=b $SUDOPRFX ../gw/gwsetup -bd ./ -gd ../gw -lang en >gwsetup.log 2>&1 &"
     set +x
     check_server_start 'gwsetup'
     grep -E "$FAILING_CONDITIONS" $BASES_DIR/gwsetup.log && \

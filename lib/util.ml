@@ -83,12 +83,12 @@ let read_base_env bname gw_prefix debug =
           k "Error %s while loading %s, using empty config" error fname);
       []
   in
-  let fname1 = !GWPARAM.config bname in
-  if Sys.file_exists fname1 then load_file fname1
+  let fname = !GWPARAM.config bname in
+  if Sys.file_exists fname then load_file fname
   else (
     if debug then
       Log.info (fun k ->
-          k "No configuration file %s found,@ see %s for example" fname1
+          k "No configuration file found (%s), see %s for example" fname
             (Filename.concat gw_prefix "a.gwf"));
     [])
 
@@ -544,12 +544,12 @@ let unauthorized conf auth_type =
   Output.status conf Code.Unauthorized;
   if not conf.cgi then
     Output.header conf "WWW-Authenticate: Basic realm=\"%s\"" auth_type;
-  Output.header conf "Content-type: text/html; charset=%s" conf.charset;
-  Output.header conf "Connection: close";
-  Output.print_sstring conf "<head><title>Access failed</title></head>\n";
-  Output.print_sstring conf "<body><h1>Access failed</h1>\n";
-  Output.printf conf "<ul><li>%s</ul>\n" auth_type;
-  Output.print_sstring conf "</body>\n</html>\n"
+  html conf;
+  Output.printf conf
+    {|<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Access failed</title></head>
+<body><h1>Access failed</h1><p>%s</p></body></html>|}
+    (escape_html auth_type :> string)
 
 let commd ?(excl = []) ?(trim = true) ?(pwd = true) ?(henv = true)
     ?(senv = true) conf : Adef.escaped_string =
@@ -791,9 +791,9 @@ let hidden_input_s conf k v = aux_input_s conf (Adef.encoded "hidden") k v
 let hidden_input conf k v = hidden_input_s conf k (Mutil.decode v)
 let hidden_env_aux conf = List.iter (fun (k, v) -> hidden_input conf k v)
 
-let hidden_env conf =
+let hidden_env ?(senv = true) conf =
   hidden_env_aux conf conf.henv;
-  hidden_env_aux conf conf.senv
+  if senv then hidden_env_aux conf conf.senv
 
 let submit_input conf k v =
   aux_input_s conf (Adef.encoded "submit") k (Mutil.decode v)
@@ -876,6 +876,23 @@ let pget_opt conf base ip =
 let pget conf base ip =
   if is_restricted conf base ip then Driver.empty_person base ip
   else Driver.poi base ip
+
+(* Visibility of a person in search results.  Shared by SearchName and
+   Some, which read persons straight from the name indexes (poi, not pget)
+   and used to re-implement the test with small differences. *)
+let visible_in_search conf base p =
+  let empty_or_quest istr =
+    Driver.Istr.is_empty istr || Driver.Istr.is_quest istr
+  in
+  (not (empty_or_quest (Driver.get_surname p)))
+  && (not (empty_or_quest (Driver.get_first_name p)))
+  && Name.lower (Driver.sou base (Driver.get_surname p)) <> ""
+  && Name.lower (Driver.sou base (Driver.get_first_name p)) <> ""
+  && (not (is_hide_names conf p && not (authorized_age conf base p)))
+  && not (is_restricted conf base (Driver.get_iper p))
+
+let visible_in_search_ip conf base ip =
+  visible_in_search conf base (Driver.poi base ip)
 
 let string_gen_person base p =
   Futil.map_person_ps (fun p -> p) (Driver.sou base) p
@@ -1104,9 +1121,13 @@ let reference_flags with_id conf base p (s : Adef.safe_string) =
   (* let is_hidden = is_empty_string (get_surname p) !! *)
   if (not (GWPARAM.p_auth conf base p)) || cgl then s
   else
+    let excl =
+      match p_getenv conf.env "m" with
+      | None | Some ("" | "R" | "RL" | "RLM") -> [ "em"; "ei"; "et" ]
+      | _ -> []
+    in
     "<a href=\""
-    ^<^ (commd ~excl:[ "em"; "ei"; "et" ] conf ^^^ acces conf base p
-          :> Adef.safe_string)
+    ^<^ (commd ~excl conf ^^^ acces conf base p :> Adef.safe_string)
     ^^^ (if with_id then "\" id=\"i" else "")
     ^<^ (if with_id then Driver.Iper.to_string iper else "")
     ^<^ "\">" ^<^ s ^>^ "</a>"
@@ -1347,12 +1368,61 @@ let string_of_witness_kind_raw witness_kind =
 
 let bpath bname = !GWPARAM.bpath bname
 
+(* Cached [dir_listing_cache_ttl] seconds. [None] = directory absent/unreadable. *)
+let dir_listing_cache :
+    (string, float * (string, unit) Hashtbl.t option) Hashtbl.t =
+  Hashtbl.create 16
+
+let dir_listing_cache_ttl = 60.0 (* seconds *)
+
+let dir_listing dir =
+  let now = Unix.time () in
+  let recompute () =
+    let listing =
+      try
+        let tbl = Hashtbl.create 16 in
+        Filesystem.walk_folder
+          (fun entry () ->
+            match entry with
+            | Filesystem.File fl | Filesystem.Dir fl ->
+                Hashtbl.replace tbl (Filename.basename fl) ()
+            | Filesystem.Exn { exn; bt; _ } ->
+                Printexc.raise_with_backtrace exn bt)
+          dir ();
+        Some tbl
+      with Unix.Unix_error _ -> None
+    in
+    Hashtbl.replace dir_listing_cache dir (now, listing);
+    listing
+  in
+  match Hashtbl.find dir_listing_cache dir with
+  | checked_at, listing when now -. checked_at < dir_listing_cache_ttl ->
+      listing
+  | _ -> recompute ()
+  | exception Not_found -> recompute ()
+
+let parse_file_cached fl = Geneweb_templ.Parser.parse_file ~src:(`File fl) fl
+let dir_exists_cached dir = dir_listing dir <> None
+
+(* [filename] may itself contain subdirectory components (e.g.
+   "js/foo.js", "modules/arbre_h6.css"): split it once so that what gets
+   cached is the listing of the directory that actually holds it, not a
+   nonexistent flat lookup key. For the common case of a flat template
+   name, [sub_dir] is ["."] and this collapses to caching [dir] itself. *)
 let find_file_in_directories directories filename =
+  let sub_dir = Filename.dirname filename in
+  let base_name = Filename.basename filename in
   let rec search = function
     | [] -> None
-    | dir :: remaining ->
-        let full_path = Filename.concat dir filename in
-        if Sys.file_exists full_path then Some full_path else search remaining
+    | dir :: remaining -> (
+        let full_dir =
+          if sub_dir = Filename.current_dir_name then dir
+          else Filename.concat dir sub_dir
+        in
+        match dir_listing full_dir with
+        | Some entries when Hashtbl.mem entries base_name ->
+            Some (Filename.concat dir filename)
+        | _ -> search remaining)
   in
   search directories
 
@@ -1365,8 +1435,18 @@ let find_file_in_directories directories filename =
     The search is done in this order:
     - bases/etc/mybase/templx/ (template [templx] in mybase)
     - bases/etc/mybase/ (default template in mybase)
+    - bases/etc/templx/ (template [templx] shared across all bases, if it
+      exists)
+    - bases/etc/ (shared default across all bases, if it exists)
     - gw/etc/templx/ (template [templx] in etc)
     - gw/etc/ (default template in etc)
+
+    The [templx] level of both [bases/etc/mybase/] and the two "shared"
+    directories above is only probed if it actually exists (checked via a
+    short-lived cache, see [dir_exists_cached] / [dir_listing]): most
+    installations never create a per-template folder, so this keeps its cost to
+    one cached [Sys.readdir] every [dir_listing_cache_ttl] seconds instead of
+    one stat() per template lookup.
 
     The template configuration variable can contain:
     - template=templ1,templ2: allows only these templates
@@ -1377,6 +1457,7 @@ let find_file_in_directories directories filename =
 
 let generate_search_directories conf =
   let base_etc = !GWPARAM.etc_d conf.bname in
+  let shared_etc = Filename.concat (Secure.base_dir ()) "etc" in
   let asset_dirs = Secure.assets () in
   let configured_templates, allow_all =
     try
@@ -1397,8 +1478,19 @@ let generate_search_directories conf =
   in
   let template_dirs =
     match current_template with
-    | Some t -> [ Filename.concat base_etc t; base_etc ]
+    | Some t ->
+        let templx_dir = Filename.concat base_etc t in
+        if dir_exists_cached templx_dir then [ templx_dir; base_etc ]
+        else [ base_etc ]
     | None -> [ base_etc ]
+  in
+  let shared_dirs =
+    let candidates =
+      match current_template with
+      | Some t -> [ Filename.concat shared_etc t; shared_etc ]
+      | None -> [ shared_etc ]
+    in
+    List.filter dir_exists_cached candidates
   in
   let asset_template_dirs =
     List.concat
@@ -1410,7 +1502,7 @@ let generate_search_directories conf =
            | None -> [ etc_dir ])
          asset_dirs)
   in
-  template_dirs @ asset_template_dirs
+  template_dirs @ shared_dirs @ asset_template_dirs
 
 (* ************************************************************************ *)
 (*  [Func] find_template_file : config -> string -> bool -> string          *)
@@ -1428,7 +1520,13 @@ let find_template_file conf fname auto_txt =
     List.fold_left Filename.concat "" (String.split_on_char '/' fname)
   in
   let final_fname =
-    if auto_txt && not (Filename.check_suffix normalized_fname ".txt") then
+    (* Only append ".txt" to a bare name (no extension at all): a name
+       that already carries its own extension (e.g. an "%include"'d
+       "foo.js" or "foo.css") must be looked up as-is. Checking only for
+       an existing ".txt" suffix (as before) let any other extension
+       silently turn into "foo.js.txt", which then could never be found
+       since real assets are never named that way. *)
+    if auto_txt && Filename.extension normalized_fname = "" then
       normalized_fname ^ ".txt"
     else normalized_fname
   in
@@ -3414,7 +3512,7 @@ let normalize_person_pool_url conf base target_module assoc_txt_opt =
       loop (i + 1))
   in
   loop 1;
-  (prefix_base_password conf :> string)
+  (commd conf :> string)
   ^ "m=" ^ target_module ^ "&"
   ^ String.concat "&" (List.rev !converted_params)
 

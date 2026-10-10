@@ -173,15 +173,6 @@ let substr_start_aux n s =
 
 let rec eval_variable (conf : Config.config) = function
   | [ "base"; "name" ] -> conf.bname
-  | [ "lang"; "full" ] ->
-      let rec func x lst c =
-        match lst with
-        | [] -> "bad language code"
-        | hd :: tl ->
-            if hd = x then Util.transl_nth conf "!languages" c
-            else func x tl (c + 1)
-      in
-      func conf.lang Version.available_languages 0
   | [ "bvar"; "list" ] ->
       let wizard_only =
         [
@@ -201,7 +192,7 @@ let rec eval_variable (conf : Config.config) = function
         aux 0 assoc_list
       in
       let l =
-        if List.assoc "sort_bvar_entries" conf.base_env = "no" then
+        if List.assoc_opt "sort_bvar_entries" conf.base_env = Some "no" then
           conf.base_env
         else List.sort (fun (k1, _v1) (k2, _v2) -> compare k1 k2) conf.base_env
       in
@@ -402,6 +393,7 @@ and eval_simple_variable conf = function
       match List.assoc_opt conf.lang !Mutil.fallback with
       | Some l -> l
       | None -> "")
+  | "base_lang" -> conf.base_lang
   | "default_lang" -> conf.default_lang
   | "browser_lang" -> conf.browser_lang
   | "left" -> conf.left
@@ -424,7 +416,6 @@ and eval_simple_variable conf = function
   | "prefix_no_all" ->
       (Util.commd ~excl:[ "templ"; "p_mod"; "wide" ] conf :> string)
   | "prefix_no_senv" -> (Util.commd ~senv:false conf :> string)
-  | "referer" -> (Util.get_referer conf :> string)
   | "right" -> conf.right
   | "sosa_ref" -> (
       match find_sosa_ref conf with
@@ -683,10 +674,9 @@ let templ_eval_var (conf : Config.config) = function
   | [ "cgi" ] -> VVbool conf.cgi
   | [ "debug" ] -> VVbool conf.debug
   | [ "false" ] -> VVbool false
-  | [ "has_referer" ] ->
-      (* deprecated since version 5.00 *)
-      VVbool (Mutil.extract_param "referer: " '\n' conf.request <> "")
+  | [ "reorg" ] -> VVbool !GWPARAM.reorg
   | [ "is_welcome" ] -> VVbool !Util.is_welcome
+  | [ "is_upd_ind" ] | [ "is_upd_fam" ] -> VVbool false
   | [ "just_friend_wizard" ] -> VVbool conf.just_friend_wizard
   | [ "friend" ] -> VVbool conf.friend
   | [ "manitou" ] -> VVbool conf.manitou
@@ -1056,7 +1046,6 @@ and eval_integer i = function
 let eval_var conf ifun env ep loc sl =
   try
     match sl with
-    | [ "reorg" ] -> VVbool !GWPARAM.reorg
     | [ "env"; "key" ] -> (
         match ifun.get_vother (Env.find "binding" env) with
         | Some (Vbind (k, _)) -> VVstring k
@@ -1281,6 +1270,7 @@ let rec eval conf ifun env =
         (* Excluded by [Geneweb_templ.Parser.parse]. *)
         assert false
     | Ast.{ desc = Apack l; _ } :: al ->
+        m_env := env;
         print_ast_list env ep l;
         print_ast_list !m_env ep al
     | [ a ] -> print_ast env ep a
@@ -1383,6 +1373,7 @@ and print_simple_variable conf = function
       Output.print_sstring conf
         (String.concat ", " (Util.get_bases_list ~format_fun:format_link ()))
   | "hidden" -> Util.hidden_env conf
+  | "hidden_no_senv" -> Util.hidden_env ~senv:false conf
   | "message_to_wizard" -> Util.message_to_wizard conf
   | "query_time" ->
       (* FIXME: This variable have been introduced in order to display the

@@ -1,6 +1,6 @@
 <!-- $Id: toolbar.txt v7.1 04/05/2026 04:40:04 $ -->
 <style>
-%if;(e.m="MOD_NOTES")
+%if;("NOTES" in e.m)
 body {
   /* Add padding to prevent content from hiding under fixed navbar */
   padding-top: 48px;
@@ -217,6 +217,13 @@ body {
               </a>
             </div>
           %end;
+          <div class="nav-item me-4">
+            <button type="button" class="nav-link btn btn-link" id="notes-wide"
+              aria-pressed="false" title="[*full width/columns]0">
+              <i class="fa fa-desktop fa-fw" aria-hidden="true"></i>
+              <span class="visually-hidden">[*full width/columns]0</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

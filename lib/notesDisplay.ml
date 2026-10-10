@@ -9,6 +9,8 @@ let src = Logs.Src.create ~doc:"NotesDisplay" "NOTE"
 module Log = (val Logs.src_log src : Logs.LOG)
 module Driver = Geneweb_db.Driver
 module Gutil = Geneweb_db.Gutil
+module Server = Geneweb_http.Server
+module Connection = Geneweb_http.Connection
 
 (* [deprecated] TYPE=album is accepted on read for backward compatibility
    with notes, all new notes always write TYPE=gallery. *)
@@ -463,9 +465,15 @@ let print_what_links_p conf base p =
         | Some "gallery" -> ("linked galleries", "linked galleries help")
         | _ -> ("linked pages", "linked pages help")
       in
-      Format.sprintf {|<span title="%s">%s</span>|}
-        (Util.transl conf lnkd_typ_help |> Utf8.capitalize_fst)
-        (Util.transl conf lnkd_typ |> Utf8.capitalize_fst)
+      let lnkd_typ_label = Util.transl conf lnkd_typ |> Utf8.capitalize_fst in
+      (* The page <title> only accepts plain text (see Hutil.header, which
+         calls [title true] there); the tooltip span is only valid in the
+         on-page <h1> (h = false). *)
+      (if h then lnkd_typ_label
+       else
+         Format.sprintf {|<span title="%s">%s</span>|}
+           (Util.transl conf lnkd_typ_help |> Utf8.capitalize_fst)
+           lnkd_typ_label)
       |> Output.print_sstring conf;
       Util.transl conf ":" |> Output.print_sstring conf;
       Output.print_sstring conf " ";
@@ -485,11 +493,17 @@ let print_what_links_p conf base p =
 
 let print_what_links conf base fnotes =
   let title h =
-    Output.print_sstring conf
-      (Format.sprintf {|<span title="%s">%s%s </span>|}
+    let label = Util.transl conf "linked pages" |> Utf8.capitalize_fst in
+    let colon = Util.transl conf ":" in
+    (* The page <title> only accepts plain text (see Hutil.header, which
+       calls [title true] there); the tooltip span is only valid in the
+       on-page <h1> (h = false). *)
+    (if h then Printf.sprintf "%s%s " label colon
+     else
+       Format.sprintf {|<span title="%s">%s%s </span>|}
          (Util.transl conf "linked pages (pages) help" |> Utf8.capitalize_fst)
-         (Util.transl conf "linked pages" |> Utf8.capitalize_fst)
-         (Util.transl conf ":"));
+         label colon)
+    |> Output.print_sstring conf;
     if h then (
       Output.print_sstring conf "[";
       Output.print_string conf (Util.escape_html fnotes);
@@ -770,7 +784,7 @@ let print_gallery conf base =
     Output.print_sstring conf
       (transl conf "note is restricted" |> Utf8.capitalize_fst)
 
-let print_mod_gallery_ok conf base =
+let print_mod_gallery_ok conn conf base =
   let fname = function
     | Some f ->
         let f = Mutil.tr ' ' '_' f in
@@ -786,7 +800,7 @@ let print_mod_gallery_ok conf base =
       (commd conf :> string)
       (Mutil.encode fname_saved :> string)
   in
-  Geneweb_http.Server.http_redirect_temporarily url
+  Connection.http_redirect_temporarily conn url
 
 let print_gallery_json conf base =
   let _, s = read_notes_from_conf conf base in

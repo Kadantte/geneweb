@@ -772,6 +772,10 @@
 # Provider issuer URL. Must be https (see above). Its discovery document is
 # fetched from "<oidc_provider_url>/.well-known/openid-configuration". Leaving
 # this empty disables OIDC for the base.
+
+# Note: m=OIDC_LOGIN / m=OIDC_LOGOUT are GET requests and the login "state" is
+# not bound to the browser, so a residual login/logout CSRF exists; SameSite=Lax
+# on the cookie mitigates it. Prefer trusted links for these actions.
 #oidc_provider_url=https://idp.example.org/realms/main
 
 # OAuth2 client credentials registered with the provider for this base.
@@ -808,3 +812,15 @@
 # Provider name shown on the welcome-page login button, after the translated
 # "connect with" (e.g. "Google" -> "Connect with Google"). Defaults to "SSO".
 #oidc_provider_name=
+
+# Lifetime in seconds of the OIDC session cookie. The session is sliding:
+# every authenticated request re-issues the cookie with a renewed expiry, so
+# this is an inactivity timeout, not a fixed delay since login. Defaults to
+# the global -login-timeout value (1800 seconds).
+#oidc_session_timeout=
+
+# Optional absolute limit in seconds on the OIDC session, counted from login:
+# once reached, the session is refused even if the user is active and they
+# must log in again. The sliding inactivity timeout above still applies before
+# that. Leave empty for no absolute limit.
+#oidc_session_max_age=

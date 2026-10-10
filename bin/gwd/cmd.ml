@@ -12,7 +12,6 @@ type plugins = All | List of plugin list
 type t = {
   (* Directories *)
   base_dir : string;
-  socket_dir : string option;
   gw_prefix : string;
   etc_prefix : string;
   images_prefix : string;
@@ -162,10 +161,11 @@ let socket_dir =
     "$(docv) specifies where socket communication and access count are \n\
     \  stored on Windows."
   in
+  let deprecated = "This option is no longer used." in
   C.Arg.(
     value
     & opt (some dirpath) None
-    & info [ "wd"; "socket-dir" ] ~docs:dirs_section ~doc)
+    & info [ "wd"; "socket-dir" ] ~docs:dirs_section ~deprecated ~doc)
 
 let gw_prefix =
   let doc =
@@ -450,7 +450,10 @@ let cgi =
 
 let daemon =
   let doc = "Run the process in the background (UNIX only)." in
-  C.Arg.(value & flag & info [ "daemon" ] ~docs:http_section ~doc)
+  let error = "--daemon is available only on UNIX." in
+  C.Arg.(
+    unix_only_flag ~error & value & flag
+    & info [ "daemon" ] ~docs:http_section ~doc)
 
 (* Web interface commands *)
 
@@ -502,19 +505,6 @@ let load_plugins =
 let load_all_plugins =
   let doc = "Load all the plugins." in
   C.Arg.(value & flag & info [ "load-all-plugins" ] ~docs:plugin_section ~doc)
-
-let plugin_flags =
-  let open C.Term.Syntax in
-  C.Term.ret
-  @@
-  let+ load_plugins = load_plugins and+ load_all_plugins = load_all_plugins in
-  match (load_plugins, load_all_plugins) with
-  | _ :: _, true ->
-      `Error
-        ( false,
-          "you cannot use both --load-plugins and --load-all-plugins options" )
-  | [], true -> `Ok All
-  | l, false -> `Ok (List (List.concat_map (List.map (fun name -> { name })) l))
 
 (* Tracing & debugging commands *)
 
@@ -579,7 +569,22 @@ let noop =
   let doc = "Internal option. DO NOT USE." in
   C.Arg.(value & flag & info [ "noop" ] ~docs:tracing_section ~doc)
 
-let debug_flags =
+(* Parsers of contexts *)
+
+let error fmt = Fmt.kstr (fun s -> `Error (false, s)) fmt
+
+let parse_plugin_flags =
+  let open C.Term.Syntax in
+  C.Term.ret
+  @@
+  let+ load_plugins = load_plugins and+ load_all_plugins = load_all_plugins in
+  match (load_plugins, load_all_plugins) with
+  | _ :: _, true ->
+      error "you cannot use both --load-plugins and --load-all-plugins options"
+  | [], true -> `Ok All
+  | l, false -> `Ok (List (List.concat_map (List.map (fun name -> { name })) l))
+
+let parse_debug_flags =
   let open C.Term.Syntax in
   let+ debug = debug
   and+ check = check
@@ -588,6 +593,18 @@ let debug_flags =
   let debug = if check then true else debug in
   let predictable_mode = if check then true else predictable_mode in
   (debug, check, verbosity, predictable_mode)
+
+let parse_cgi_flags =
+  let open C.Term.Syntax in
+  C.Term.ret
+  @@
+  let+ cgi = cgi and+ log = log in
+  match log with
+  | Stdout when cgi ->
+      error
+        "you cannot redirect the diagnostic output of the server into the \
+         standard output in CGI mode"
+  | _ -> `Ok cgi
 
 let t =
   let open C.Term.Syntax in
@@ -605,7 +622,7 @@ let t =
   in
   C.Cmd.make (C.Cmd.info "gwd" ~envs ~version:Version.ver ~doc)
   @@
-  let+ base_dir, socket_dir, gw_prefix, images_prefix, etc_prefix, images_dir =
+  let+ base_dir, _, gw_prefix, images_prefix, etc_prefix, images_dir =
     directories
   and+ cache_databases = cache_databases
   and+ lexicon_files = lexicon_files
@@ -631,20 +648,19 @@ let t =
   and+ max_pending_requests = max_pending_requests
   and+ _ : int = max_clients
   and+ n_workers = n_workers
-  and+ cgi = cgi
+  and+ cgi = parse_cgi_flags
   and+ daemon = daemon
   and+ default_lang = default_lang
   and+ _ : bool = browser_lang
   and+ _ : bool = setup_link
-  and+ plugins = plugin_flags
-  and+ debug, check, verbosity, predictable_mode = debug_flags
+  and+ plugins = parse_plugin_flags
+  and+ debug, check, verbosity, predictable_mode = parse_debug_flags
   and+ log = log
   and+ trace_failed_password = trace_failed_password
   and+ _ : bool = no_fork
   and+ _ : bool = noop in
   {
     base_dir;
-    socket_dir;
     gw_prefix;
     images_prefix;
     images_dir;
